@@ -1,17 +1,23 @@
 package sql_exporter
 
 import (
-	"context"
-	"database/sql"
-	"fmt"
-	"strings"
+        "context"
+        "database/sql"
+        "fmt"
+        "os"
+        "strings"
+        "crypto/aes"
+        "crypto/cipher"
+        "encoding/base64"
+        "encoding/hex"
 
-	_ "github.com/ClickHouse/clickhouse-go" // register the ClickHouse driver
-	_ "github.com/denisenkom/go-mssqldb"    // register the MS-SQL driver
-	_ "github.com/go-sql-driver/mysql"      // register the MySQL driver
-	log "github.com/golang/glog"
-	_ "github.com/lib/pq" // register the PostgreSQL driver
+        _ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
+        _ "github.com/go-sql-driver/mysql"   // register the MySQL driver
+        log "github.com/golang/glog"
+        _ "github.com/kshvakov/clickhouse" // register the ClickHouse driver
+        _ "github.com/lib/pq"              // register the PostgreSQL driver
 )
+
 
 // OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
 // some driver supported DSN formats don't include a scheme), opens a DB handle ensuring early termination if the
@@ -44,50 +50,100 @@ import (
 // prefix replaced with `tcp://`):
 //   clickhouse://host:port?username=username&password=password&database=dbname&param=value
 func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxIdleConns int) (*sql.DB, error) {
-	// Extract driver name from DSN.
-	idx := strings.Index(dsn, "://")
-	if idx == -1 {
-		return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`.")
-	}
-	driver := dsn[:idx]
 
-	// Adjust DSN, where necessary.
-	switch driver {
-	case "mysql":
-		dsn = strings.TrimPrefix(dsn, "mysql://")
-	case "clickhouse":
-		dsn = "tcp://" + strings.TrimPrefix(dsn, "clickhouse://")
-	}
+        //
+        // TK 20230320 check if the dsn is encrypted
+        //
+        if strings.HasPrefix(dsn, "encrypted://") {
+                // decrypt / encrypt routine from https://gist.github.com/humamfauzi/a29ea50edeb175e2e8a9e3456b91fe36
+                // 
+                // quick kludge to support encryption of the entire dsn. The encrypt routine isn't needed here, so refer to the url above
+                // on how to encrypt the dsn.
+                //
 
-	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
-	var (
-		conn *sql.DB
-		err  error
-		ch   = make(chan error)
-	)
-	go func() {
-		conn, err = sql.Open(driver, dsn)
-		close(ch)
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-ch:
-		if err != nil {
-			return nil, err
-		}
-	}
+                encryptedString := strings.TrimPrefix(dsn, "encrypted://")
+                // fmt.Printf("TK: encryptedString : %s\n", encryptedString)
+                
+                // Make sure you keep the environment variable secure.
+                // export SQLEXPORTER_KEY=badbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbada
+		key, _ := hex.DecodeString(os.Getenv("SQLEXPORTER_KEY"))
 
-	conn.SetMaxIdleConns(maxIdleConns)
-	conn.SetMaxOpenConns(maxConns)
+                // Alternatively bake the secret key into the code. 
+                // key, _ := hex.DecodeString("badbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbada")
 
-	if log.V(1) {
-		if len(logContext) > 0 {
-			logContext = fmt.Sprintf("[%s] ", logContext)
-		}
-		log.Infof("%sDatabase handle successfully opened with driver %s.", logContext, driver)
-	}
-	return conn, nil
+                block, err := aes.NewCipher(key)
+                if err != nil {
+                        panic(err)
+                }
+        
+                gcm, err := cipher.NewGCM(block)
+                if err != nil {
+                        panic(err)
+                }
+        
+                decryptBase64, err := base64.StdEncoding.DecodeString(encryptedString)
+        
+                if err != nil {
+                        panic(err)
+                }
+        
+                nonce, cipherText := decryptBase64[:gcm.NonceSize()], decryptBase64[gcm.NonceSize():]
+                plainText, err := gcm.Open(nil, nonce, cipherText, nil)
+                if err != nil {
+                        panic(err)
+                }
+        
+                // fmt.Println("TK DECRYPTED", string(plainText))
+                dsn = string(plainText)
+                
+        }
+
+
+
+        // Extract driver name from DSN.
+        idx := strings.Index(dsn, "://")
+        if idx == -1 {
+                return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`.")
+        }
+        driver := dsn[:idx]
+
+        // Adjust DSN, where necessary.
+        switch driver {
+        case "mysql":
+                dsn = strings.TrimPrefix(dsn, "mysql://")
+        case "clickhouse":
+                dsn = "tcp://" + strings.TrimPrefix(dsn, "clickhouse://")
+        }
+
+        // Open the DB handle in a separate goroutine so we can terminate early if the context closes.
+        var (
+                conn *sql.DB
+                err  error
+                ch   = make(chan error)
+        )
+        go func() {
+                conn, err = sql.Open(driver, dsn)
+                close(ch)
+        }()
+        select {
+        case <-ctx.Done():
+                return nil, ctx.Err()
+        case <-ch:
+                if err != nil {
+                        return nil, err
+                }
+        }
+
+        conn.SetMaxIdleConns(maxIdleConns)
+        conn.SetMaxOpenConns(maxConns)
+
+        if log.V(1) {
+                if len(logContext) > 0 {
+                        logContext = fmt.Sprintf("[%s] ", logContext)
+                }
+                log.Infof("%sDatabase handle successfully opened with driver %s.", logContext, driver)
+        }
+        return conn, nil
 }
 
 // PingDB is a wrapper around sql.DB.PingContext() that terminates as soon as the context is closed.
@@ -96,17 +152,17 @@ func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxId
 // database is down) and the driver uses an arbitrary timeout which may well be longer than ours. So we run the ping
 // call in a goroutine and terminate immediately if the context is closed.
 func PingDB(ctx context.Context, conn *sql.DB) error {
-	ch := make(chan error, 1)
+        ch := make(chan error, 1)
 
-	go func() {
-		ch <- conn.PingContext(ctx)
-		close(ch)
-	}()
+        go func() {
+                ch <- conn.PingContext(ctx)
+                close(ch)
+        }()
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-ch:
-		return err
-	}
+        select {
+        case <-ctx.Done():
+                return ctx.Err()
+        case err := <-ch:
+                return err
+        }
 }
