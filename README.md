@@ -40,10 +40,10 @@ When the `GO` is installed on the machine and the content of the repo is placed 
 - `go build -ldflags "-s -w" -o .build\windows-amd64\ .\cmd\sql_exporter\` (this specific command is necessary, since it creates sql_expoter executable binary within `.build\windows-amd64\` directory.)
 
 If the build is completed, then it's halfway road to an end, since the only thing left is to assign the following details to `environment variables` (it can be also retrieved from the PasswordVault via CCP):
-- ![Username](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/username_env.png)
-- ![Password](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/password_env.png)
-- ![Database](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
-- ![Hostt & Port](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
+![Username](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/username_env.png)
+![Password](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/password_env.png)
+![Database](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
+![Hostt & Port](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
 
 ## Configuration
 
