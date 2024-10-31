@@ -35,7 +35,7 @@ If you wish to use this version of SQL Expoter you can either download the conte
 Prerequisites:
 - [Go Compiler](https://go.dev/doc/install)
 
-When the `GO` is installed on the machine and the content of the repo is placed in your desired location (e.g.: `C:\Users\YOUR_PROFILE\Projects\sql_exporter`), then you need to run following commands:
+When the `GO` is installed on the machine and the content of the repo is placed in your desired location, e.g.: `C:\Users\YOUR_PROFILE\Projects\sql_exporter`, then you need to run following commands:
 - `go mod tidy` (it ensures the all required packages are downloaded)
 - `go build -ldflags "-s -w" -o .build\windows-amd64\ .\cmd\sql_exporter\` (this specific command is necessary, since it creates sql_expoter executable binary within `.build\windows-amd64\` directory.)
 
