@@ -42,7 +42,7 @@ When the `GO` is installed on the machine and the content of the repo is placed 
 If the build is completed, then it's halfway road to an end, since the only thing left is to assign the following details to `environment variables` (it can be also retrieved from the `PasswordVault` via `CCP`):
 ![Username](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/username_env.png)
 ![Password](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/password_env.png)
-![Database](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
+![Database](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/database_env.png)
 ![Hostt & Port](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
 
 ## Configuration
@@ -160,9 +160,6 @@ sc.exe create SqlExporterSvc binPath= "%SQL_EXPORTER_PATH%\sql_exporter.exe --co
 
 `%SQL_EXPORTER_PATH%` is a path to the SQL Exporter binary executable. This document assumes that configuration files
 are in the same location.
-
-In case you need a more sophisticated setup (e.g. with logging, environment variables, etc), you might want to use [NSSM](https://nssm.cc/) or
-[WinSW](https://github.com/winsw/winsw). Please consult their documentation for more details.
 
 </details>
 
