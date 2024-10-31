@@ -28,7 +28,7 @@ metrics when queried more frequently than the configured interval.
 
 ## Usage
 
-If you wished to use this version of SQL Expoter you can either download the content of the repository as a `ZIP` file or directly `clone` the repository via `git` software.
+If you wish to use this version of SQL Expoter you can either download the content of the repository as a `zip` file or directly `clone` the repository via `git` software.
 
 ## Build
 
