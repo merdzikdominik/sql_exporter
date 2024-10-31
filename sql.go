@@ -1,149 +1,67 @@
 package sql_exporter
 
 import (
-        "context"
-        "database/sql"
-        "fmt"
-        "os"
-        "strings"
-        "crypto/aes"
-        "crypto/cipher"
-        "encoding/base64"
-        "encoding/hex"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"os"
+	"time"
 
-        _ "github.com/denisenkom/go-mssqldb" // register the MS-SQL driver
-        _ "github.com/go-sql-driver/mysql"   // register the MySQL driver
-        log "github.com/golang/glog"
-        _ "github.com/kshvakov/clickhouse" // register the ClickHouse driver
-        _ "github.com/lib/pq"              // register the PostgreSQL driver
+	"github.com/xo/dburl"
 )
 
+// OpenConnection parses a provided DSN, and opens a DB handle ensuring early termination if the context is closed
+// (this is actually prevented by `database/sql` implementation), sets connection limits and returns the handle.
+func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxIdleConns int, maxConnLifetime time.Duration) (*sql.DB, error) {
+	var (
+		url  *dburl.URL
+		conn *sql.DB
+		err  error
+		ch   = make(chan error)
+	)
 
-// OpenConnection extracts the driver name from the DSN (expected as the URI scheme), adjusts it where necessary (e.g.
-// some driver supported DSN formats don't include a scheme), opens a DB handle ensuring early termination if the
-// context is closed (this is actually prevented by `database/sql` implementation), sets connection limits and returns
-// the handle.
-//
-// Below is the list of supported databases (with built in drivers) and their DSN formats. Unfortunately there is no
-// dynamic way of loading a third party driver library (as e.g. with Java classpaths), so any driver additions require
-// a binary rebuild.
-//
-// MySQL
-//
-// Using the https://github.com/go-sql-driver/mysql driver, DSN format (passed to the driver stripped of the `mysql://`
-// prefix):
-//   mysql://username:password@protocol(host:port)/dbname?param=value
-//
-// PostgreSQL
-//
-// Using the https://godoc.org/github.com/lib/pq driver, DSN format (passed through to the driver unchanged):
-//   postgres://username:password@host:port/dbname?param=value
-//
-// MS SQL Server
-//
-// Using the https://github.com/denisenkom/go-mssqldb driver, DSN format (passed through to the driver unchanged):
-//   sqlserver://username:password@host:port/instance?param=value
-//
-// Clickhouse
-//
-// Using the https://github.com/kshvakov/clickhouse driver, DSN format (passed to the driver with the`clickhouse://`
-// prefix replaced with `tcp://`):
-//   clickhouse://host:port?username=username&password=password&database=dbname&param=value
-func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxIdleConns int) (*sql.DB, error) {
+	url, err = safeParse(dsn)
+	if err != nil {
+		return nil, err
+	}
 
-        //
-        // TK 20230320 check if the dsn is encrypted
-        //
-        if strings.HasPrefix(dsn, "encrypted://") {
-                // decrypt / encrypt routine from https://gist.github.com/humamfauzi/a29ea50edeb175e2e8a9e3456b91fe36
-                // 
-                // quick kludge to support encryption of the entire dsn. The encrypt routine isn't needed here, so refer to the url above
-                // on how to encrypt the dsn.
-                //
+	driver := url.Driver
+	if url.GoDriver != "" {
+		driver = url.GoDriver
+	}
 
-                encryptedString := strings.TrimPrefix(dsn, "encrypted://")
-                // fmt.Printf("TK: encryptedString : %s\n", encryptedString)
-                
-                // Make sure you keep the environment variable secure.
-                // export SQLEXPORTER_KEY=badbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbada
-		key, _ := hex.DecodeString(os.Getenv("SQLEXPORTER_KEY"))
+	// function which determines encrypting database credentials by assining them to environment variables so config yaml doesn't contain sensitive data 
+	go func() {
+		host := os.Getenv("Host")
+		database := os.Getenv("Database")
+		username := os.Getenv("Username")
+		password := os.Getenv("Password")
 
-                // Alternatively bake the secret key into the code. 
-                // key, _ := hex.DecodeString("badbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbada")
+        url.DSN = fmt.Sprintf("%s:%s@%s/%s",username, password, host, database)
 
-                block, err := aes.NewCipher(key)
-                if err != nil {
-                        panic(err)
-                }
-        
-                gcm, err := cipher.NewGCM(block)
-                if err != nil {
-                        panic(err)
-                }
-        
-                decryptBase64, err := base64.StdEncoding.DecodeString(encryptedString)
-        
-                if err != nil {
-                        panic(err)
-                }
-        
-                nonce, cipherText := decryptBase64[:gcm.NonceSize()], decryptBase64[gcm.NonceSize():]
-                plainText, err := gcm.Open(nil, nonce, cipherText, nil)
-                if err != nil {
-                        panic(err)
-                }
-        
-                // fmt.Println("TK DECRYPTED", string(plainText))
-                dsn = string(plainText)
-                
-        }
+        conn, err = sql.Open(driver, url.DSN)
 
+		close(ch)
+	}()
 
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-ch:
+		if err != nil {
+			return nil, err
+		}
+	}
 
-        // Extract driver name from DSN.
-        idx := strings.Index(dsn, "://")
-        if idx == -1 {
-                return nil, fmt.Errorf("missing driver in data source name. Expected format `<driver>://<dsn>`.")
-        }
-        driver := dsn[:idx]
+	conn.SetMaxIdleConns(maxIdleConns)
+	conn.SetMaxOpenConns(maxConns)
+	conn.SetConnMaxLifetime(maxConnLifetime)
 
-        // Adjust DSN, where necessary.
-        switch driver {
-        case "mysql":
-                dsn = strings.TrimPrefix(dsn, "mysql://")
-        case "clickhouse":
-                dsn = "tcp://" + strings.TrimPrefix(dsn, "clickhouse://")
-        }
-
-        // Open the DB handle in a separate goroutine so we can terminate early if the context closes.
-        var (
-                conn *sql.DB
-                err  error
-                ch   = make(chan error)
-        )
-        go func() {
-                conn, err = sql.Open(driver, dsn)
-                close(ch)
-        }()
-        select {
-        case <-ctx.Done():
-                return nil, ctx.Err()
-        case <-ch:
-                if err != nil {
-                        return nil, err
-                }
-        }
-
-        conn.SetMaxIdleConns(maxIdleConns)
-        conn.SetMaxOpenConns(maxConns)
-
-        if log.V(1) {
-                if len(logContext) > 0 {
-                        logContext = fmt.Sprintf("[%s] ", logContext)
-                }
-                log.Infof("%sDatabase handle successfully opened with driver %s.", logContext, driver)
-        }
-        return conn, nil
+	slog.Debug("Database handle successfully opened", "logContext", logContext, "driver", driver)
+	return conn, nil
 }
 
 // PingDB is a wrapper around sql.DB.PingContext() that terminates as soon as the context is closed.
@@ -152,17 +70,44 @@ func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxId
 // database is down) and the driver uses an arbitrary timeout which may well be longer than ours. So we run the ping
 // call in a goroutine and terminate immediately if the context is closed.
 func PingDB(ctx context.Context, conn *sql.DB) error {
-        ch := make(chan error, 1)
+	ch := make(chan error, 1)
 
-        go func() {
-                ch <- conn.PingContext(ctx)
-                close(ch)
-        }()
+	go func() {
+		ch <- conn.PingContext(ctx)
+		close(ch)
+	}()
 
-        select {
-        case <-ctx.Done():
-                return ctx.Err()
-        case err := <-ch:
-                return err
-        }
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-ch:
+		return err
+	}
+}
+
+// safeParse wraps dburl.Parse method in order to prevent leaking credentials
+// if underlying url parse failed. By default it returns a raw url string in error message,
+// which most likely contains a password. It's undesired here.
+func safeParse(rawURL string) (*dburl.URL, error) {
+
+	parsed, err := dburl.Parse(expandEnv(rawURL))
+	if err != nil {
+		if uerr := new(url.Error); errors.As(err, &uerr) {
+			return nil, uerr.Err
+		}
+		return nil, errors.New("invalid URL")
+	}
+	return parsed, nil
+}
+
+// expandEnv falls back to the original env variable if not found for better readability
+func expandEnv(env string) string {
+	lookupFunc := func(env string) string {
+		if value, ok := os.LookupEnv(env); ok {
+			return value
+		}
+		slog.Error("Environment variable is not found, cannot expand", "env", env)
+		return fmt.Sprintf("$%s", env)
+	}
+	return os.Expand(env, lookupFunc)
 }

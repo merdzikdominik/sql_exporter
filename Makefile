@@ -11,9 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# To distinguish between native Windows and Windows Subsystem for Linux (WSL),
+# we have to check how PATH is separated. For WSL and Unix-based systems it's
+# a colon; for native Windows it's a semicolon.
+ifeq '$(findstring ;,$(PATH))' ';'
+	GOPATH = $(firstword $(subst ;, ,$(shell $(GO) env GOPATH)))
+	PREFIX = $(shell cd)
+endif
+
 GO     := go
-GOPATH := $(firstword $(subst :, ,$(shell $(GO) env GOPATH)))
+GOPATH ?= $(firstword $(subst :, ,$(shell $(GO) env GOPATH)))
 PROMU  := $(GOPATH)/bin/promu
+PROMU_VERSION := v0.17.0
 pkgs    = $(shell $(GO) list ./... | grep -v /vendor/)
 
 PREFIX              ?= $(shell pwd)
@@ -30,7 +39,7 @@ style:
 
 test:
 	@echo ">> running tests"
-	@$(GO) test -short -race $(pkgs)
+	@$(GO) test -short $(pkgs)
 
 format:
 	@echo ">> formatting code"
@@ -44,18 +53,46 @@ build: promu
 	@echo ">> building binaries"
 	@$(PROMU) build --prefix $(PREFIX)
 
+drivers-%:
+	@echo ">> generating drivers.go with selected drivers"
+	@$(GO) get github.com/dave/jennifer/jen
+	@$(GO) run drivers_gen.go -- $*
+	@$(GO) get ./...
+	@$(GO) mod tidy
+
 tarball: promu
 	@echo ">> building release tarball"
 	@$(PROMU) tarball --prefix $(PREFIX) $(BIN_DIR)
+
+crossbuild: promu
+	@echo ">> building crossbuild release"
+	@$(PROMU) crossbuild
+
+crossbuild-tarballs: promu
+	@echo ">> building crossbuild release tarballs"
+	@$(PROMU) crossbuild tarballs
+
+crossbuild-checksum: promu
+	@echo ">> calculating checksums for released packages"
+	@$(PROMU) checksum .tarballs
+
+crossbuild-release: promu crossbuild crossbuild-tarballs crossbuild-checksum
 
 docker:
 	@echo ">> building docker image"
 	@docker build -t "$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG)" .
 
+# Override for native Windows, where the path separator is a semicolon.
+ifeq '$(findstring ;,$(PATH))' ';'
+promu:
+	@set GOOS=windows
+	@set GOARCH=$(subst AMD64,amd64,$(patsubst i%86,386,$(shell echo %PROCESSOR_ARCHITECTURE%)))
+	@$(GO) install github.com/prometheus/promu@$(PROMU_VERSION)
+else
 promu:
 	@GOOS=$(shell uname -s | tr A-Z a-z) \
 		GOARCH=$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))) \
-		$(GO) get -u github.com/prometheus/promu
-
+		$(GO) install github.com/prometheus/promu@$(PROMU_VERSION)
+endif
 
 .PHONY: all style format build test vet tarball docker promu
