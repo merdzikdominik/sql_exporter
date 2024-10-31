@@ -28,52 +28,22 @@ metrics when queried more frequently than the configured interval.
 
 ## Usage
 
-Get Prometheus SQL Exporter, either as a [packaged release](https://github.com/burningalchemist/sql_exporter/releases/latest),
-as a [Docker image](https://hub.docker.com/r/burningalchemist/sql_exporter).
-
-Use the `-help` flag to get help information.
-
-```shell
-$ ./sql_exporter -help
-Usage of ./sql_exporter:
-  -config.file string
-      SQL Exporter configuration file path. (default "sql_exporter.yml")
-  -web.listen-address string
-      Address to listen on for web interface and telemetry. (default ":9399")
-  -web.metrics-path string
-      Path under which to expose metrics. (default "/metrics")
-  [...]
-```
+If you wished to use this version of SQL Expoter you can either download the content of the repository as a `ZIP` file or directly `clone` the repository via `git` software.
 
 ## Build
 
 Prerequisites:
+- [Go Compiler](https://go.dev/doc/install)
 
-- Go Compiler
-- GNU Make
+When the `GO` is installed on the machine, and the content of the repo is placed in your desired location (e.g.: `C:\Users\YOUR_PROFILE\Projects\sql_exporter`), then you need to run following commands:
+- go mod tidy (it ensures the all required packages are downloaded)
+- go build -ldflags "-s -w" -o .build\windows-amd64\ .\cmd\sql_exporter\ (this specific command is necessary, since it creates sql_expoter executable binary within `.build\windows-amd64\` directory.)
 
-By default we produce a binary with all the supported drivers with the following command:
-
-```shell
-make build
-```
-
-It's also possible to reduce the size of the binary by only including specific set of drivers like Postgres, MySQL and
-MSSQL. In this case we need to update `drivers.go`. To avoid manual manipulation there is a helper code generator
-available, so we can run the following commands:
-
-```shell
-make drivers-minimal
-make build
-```
-
-The first command will regenerate `drivers.go` file with a minimal set of imported drivers using `drivers_gen.go`.
-
-Running `make drivers-all` will regenerate driver set back to the current defaults.
-
-Feel free to revisit and add more drivers as required. There's also the `custom` list that allows managing a separate
-list of drivers for special needs.
-
+If the build is completed, then it's halfway road to an end, since the only thing left is to assign the following details to `environment variables` (it can be also retrieved from the PasswordVault via CCP):
+- ![Username](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/username_env.png)
+- ![Password](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/password_env.png)
+- ![Database](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
+- ![Hostt & Port](https://github.com/merdzikdominik/sql_exporter/blob/master/env_examples/hostport_env.png)
 
 ## Configuration
 
@@ -86,10 +56,6 @@ SQL Exporter process metrics are exported at `/sql_exporter_metrics`.
 The configuration examples listed here only cover the core elements. For a comprehensive and comprehensively documented
 configuration file check out
 [`documentation/sql_exporter.yml`](https://github.com/burningalchemist/sql_exporter/tree/master/documentation/sql_exporter.yml).
-You will find ready to use "standard" DBMS-specific collector definitions in the
-[`examples`](https://github.com/burningalchemist/sql_exporter/tree/master/examples) directory. You may contribute your
-own collector definitions and metric additions if you think they could be more widely useful, even if they are merely
-different takes on already covered DBMSs.
 
 **`./sql_exporter.yml`**
 
@@ -114,9 +80,8 @@ target:
   # Target name (optional). Setting this field enables extra metrics e.g. `up` and `scrape_duration` with
   # the `target` label that are always returned on a scrape.
   name: "prices_db"
-  # Data source name always has a URI schema that matches the driver name. In some cases (e.g. MySQL)
-  # the schema gets dropped or replaced to match the driver expected DSN format.
-  data_source_name: 'sqlserver://prom_user:prom_password@dbserver1.example.com:1433'
+  # This is the main part where the change takes place, the sensitive data are pre-configured within the sql.go file so the DSN doesn't contain any of the user information
+  data_source_name: 'sqlserver://'
 
   # Collectors (referenced by name) to execute on the target.
   # Glob patterns are supported (see <https://pkg.go.dev/path/filepath#Match> for syntax).
@@ -175,165 +140,12 @@ metrics:
 
 ### Data Source Names (DSN)
 
-To keep things simple and yet allow fully configurable database connections, SQL Exporter uses DSNs (like
-`sqlserver://prom_user:prom_password@dbserver1.example.com:1433`) to refer to database instances.
+The main difference compared to the original config file is that the DSN doesn't contain any of the sensitive data, so it looks like this:
+`sqlserver://'
 
 This exporter relies on `xo/dburl` package for parsing Data Source Names (DSN). The goal is to have a
 unified way to specify DSNs across all supported databases. This can potentially affect your connection to certain
 databases like MySQL, so you might want to adjust your connection string accordingly:
-
-```plaintext
-mysql://user:pass@localhost/dbname - for TCP connection
-mysql:/var/run/mysqld/mysqld.sock - for Unix socket connection
-```
-
-> [!IMPORTANT]
-> If your DSN contains special characters in any part of your connection string (including passwords), you might need to
-apply [URL encoding](https://en.wikipedia.org/wiki/URL_encoding#Reserved_characters) (percent-encoding) to them.
-For example, `p@$$w0rd#abc` then becomes `p%40%24%24w0rd%23abc`.
-
-For additional details please refer to [xo/dburl](https://github.com/xo/dburl) documentation.
-
-
-## Miscellaneous
-
-<details>
-<summary>Multiple database connections</summary>
-
-It is possible to run a single exporter instance against multiple database connections. In this case we need to
-configure `jobs` list instead of the `target` section as in the following example:
-
-```yaml
-jobs:
-  - job_name: db_targets
-    collectors: [pricing_data_freshness, pricing_*]
-    enable_ping: true # Optional, true by default. Set to `false` in case you connect to pgbouncer or a data warehouse
-    static_configs:
-      - targets:
-          pg1: 'pg://db1@127.0.0.1:25432/postgres?sslmode=disable'
-          pg2: 'postgresql://username:password@pg-host.example.com:5432/dbname?sslmode=disable'
-        labels:  # Optional, arbitrary key/value pair for all targets
-          cluster: cluster1
-```
-
-, where DSN strings are assigned to the arbitrary instance names (i.e. pg1 and pg2).
-
-We can also define multiple jobs to run different collectors against different target sets.
-
-Since v0.14, sql_exporter can be passed an optional list of job names to filter out metrics. The `jobs[]` query
-parameter may be used multiple times. In Prometheus configuration we can use this syntax under the [scrape
-config](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#%3Cscrape_config%3E):
-
-```yaml
-  params:
-    jobs[]:
-      - db_targets1
-      - db_targets2
-```
-
-This might be useful for scraping targets with different intervals or any other advanced use cases, when calling all
-jobs at once is undesired.
-
-</details>
-
-<details>
-<summary>Scraping PgBouncer, ProxySQL, Clickhouse or Snowflake</summary>
-
-Given that PgBouncer is a connection pooler, it doesn't support all the commands that a regular SQL database does, so
-we need to make some adjustments to the configuration:
-
-- add `enable_ping: false` to the metric/job configuration as PgBouncer doesn't support the ping command;
-- add `no_prepared_statement: true` to the metric/job configuration as PgBouncer doesn't support the extended query protocol;
-
-For libpq (postgres) driver we only need to set `no_prepared_statement: true` parameter. For pgx driver, we also need to
-add `default_query_exec_mode=simple_protocol` parameter to the DSN (for v5).
-
-Below is an example of a metric configuration for PgBouncer:
-```yaml
-    metrics:
-      - metric_name: max_connections
-        no_prepared_statement: true
-        type: gauge
-        values: [max_connections]
-        key_labels:
-          - name
-          - database
-          - force_user
-          - pool_mode
-          - disabled
-          - paused
-          - current_connections
-          - reserve_pool
-          - min_pool_size
-          - pool_size
-          - port
-        query: |
-          SHOW DATABASES;
-
-```
-
-Same goes for ProxySQL and Clickhouse, where we need to add `no_prepared_statement: true` to the metric/job
-configuration, as these databases doesn't support prepared statements.
-
-In case, you connect to a data warehouse (e.g. Snowflake) you don't want to keep online all the time (due to the extra
-cost), you might want to disable `ping` by setting `enable_ping: false`.
-</details>
-
-
-<details>
-<summary>Using AWS Secrets Manager</summary>
-
-If the database runs on AWS EC2 instance, this is a secure option to store the DSN without having it in
-the configuration file. To use this option:
-
-- Create a [secret](https://docs.aws.amazon.com/secretsmanager/latest/userguide/manage_create-basic-secret.html) in
-  key/value pairs format, specify Key `data_source_name` and then for Value enter the DSN value.
-  For the secret name, enter a name for your secret, and pass that name in the configuration file as a value for
-  `aws_secret_name` item under `target`. Secret json example:
-
-```json
-{
-  "data_source_name": "sqlserver://prom_user:prom_password@dbserver1.example.com:1433"
-}
-```
-
-- Configuration file example:
-
-```yaml
-...
-target:
-  aws_secret_name: '<AWS_SECRET_NAME>'
-...
-```
-
-- Allow read-only access from EC2 IAM role to the secret by attaching a [resource-based
-policy](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_resource-based-policies.html) to
-the secret. Policy example:
-
-```json
-{
-  "Version" : "2012-10-17",
-  "Statement" : [
-    {
-      "Effect": "Allow",
-      "Principal": {"AWS": "arn:aws:iam::123456789012:role/EC2RoleToAccessSecrets"},
-      "Action": "secretsmanager:GetSecretValue",
-      "Resource": "*",
-    }
-  ]
-}
-```
-
-Currently, AWS Secret Manager integration is only available for a single target configuration.
-
-</details>
-
-<details>
-<summary>Run as a Windows service</summary>
-
-If you run SQL Exporter from Windows, it might come in handy to register it as a service to avoid interactive sessions.
-It is **important** to define `--config.file` parameter to load the configuration file. The other settings can be added
-as well. The registration itself is performed with Powershell or CMD (make sure you run it as Administrator):
 
 Powershell:
 
@@ -399,3 +211,5 @@ configurations are not easily reused without copy-pasting and editing across job
 
 This is a permanent fork of Database agnostic SQL exporter for [Prometheus](https://prometheus.io) created by
 [@free](https://github.com/free/sql_exporter).
+
+NOTE: This repo is created basing on [sqlalchemits's](https://github.com/burningalchemist/sql_exporter/tree/master) repo.
