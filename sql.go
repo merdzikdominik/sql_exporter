@@ -33,17 +33,15 @@ func OpenConnection(ctx context.Context, logContext, dsn string, maxConns, maxId
 		driver = url.GoDriver
 	}
 
-	// function which determines encrypting database credentials by assining them to environment variables so config yaml doesn't contain sensitive data 
+	// Open the DB handle in a separate goroutine so we can terminate early if the context closes.
 	go func() {
 		host := os.Getenv("Host")
 		database := os.Getenv("Database")
 		username := os.Getenv("Username")
 		password := os.Getenv("Password")
 
-        url.DSN = fmt.Sprintf("%s:%s@%s/%s",username, password, host, database)
-
-        conn, err = sql.Open(driver, url.DSN)
-
+		url.DSN = fmt.Sprintf("server=%s;database=%s;user id=%s;password=%s;Trusted_Connection=True;", host, database, username, password)
+		conn, err = sql.Open(driver, url.DSN)
 		close(ch)
 	}()
 
