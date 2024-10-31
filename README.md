@@ -141,7 +141,7 @@ metrics:
 ### Data Source Names (DSN)
 
 The main difference compared to the original config file is that the DSN doesn't contain any of the sensitive data, so it looks like this:
-`sqlserver://'
+`sqlserver://`
 
 This exporter relies on `xo/dburl` package for parsing Data Source Names (DSN). The goal is to have a
 unified way to specify DSNs across all supported databases. This can potentially affect your connection to certain
