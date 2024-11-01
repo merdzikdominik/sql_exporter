@@ -205,5 +205,5 @@ configurations are not easily reused without copy-pasting and editing across job
 This is a permanent fork of Database agnostic SQL exporter for [Prometheus](https://prometheus.io) created by
 [@free](https://github.com/free/sql_exporter).
 
-[!NOTE] 
+> [!NOTE]
 This repo is created basing on [sqlalchemist's](https://github.com/burningalchemist/sql_exporter/tree/master) repo.
