@@ -141,7 +141,7 @@ metrics:
 ### Data Source Names (DSN)
 
 The main difference compared to the original config file is that the DSN doesn't contain any of the sensitive data, so it looks like this:
-`sqlserver://`
+`data_source_name: sqlserver://`.
 
 Powershell:
 
@@ -205,4 +205,4 @@ configurations are not easily reused without copy-pasting and editing across job
 This is a permanent fork of Database agnostic SQL exporter for [Prometheus](https://prometheus.io) created by
 [@free](https://github.com/free/sql_exporter).
 
-NOTE: This repo is created basing on [sqlalchemits's](https://github.com/burningalchemist/sql_exporter/tree/master) repo.
+NOTE: This repo is created basing on [sqlalchemist's](https://github.com/burningalchemist/sql_exporter/tree/master) repo.
